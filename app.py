@@ -3,6 +3,14 @@ import tornado.web
 import tornado.log
 
 import os
+import boto3
+
+client = boto3.client(
+  'ses',
+  region_name='us-east-1',
+  aws_access_key_id=os.environ.get('AWS_ACCESS_KEY'),
+  aws_secret_access_key=os.environ.get('AWS_SECRET_KEY')
+)
 
 from jinja2 import \
   Environment, PackageLoader, select_autoescape
@@ -34,17 +42,64 @@ class MainHandler(TemplateHandler):
     }
     self.render_template("hello.html", context)
 
-class Page2Handler(TemplateHandler):
+class PageHandler(TemplateHandler):
+  def get(self, page):
+    context = {}
+    if page == 'form-success':
+      context['message'] = "YAY!"
+      
+    page = page + '.html'
+    self.set_header(
+      'Cache-Control',
+      'no-store, no-cache, must-revalidate, max-age=0')
+    self.render_template(page, context)
+    
+def send_email (email, comments):
+  response = client.send_email(
+    Destination={
+      'ToAddresses': ['paul.m.bailey@gmail.com'],
+    },
+    Message={
+      'Body': {
+        'Text': {
+          'Charset': 'UTF-8',
+          'Data': '{} wants to talk to you\n\n{}'.format(email, comments),
+        },
+      },
+      'Subject': {'Charset': 'UTF-8', 'Data': 'Test email'},
+    },
+    Source='mailer@neutron.education',
+  )
+class FormHandler(TemplateHandler):
   def get(self):
     self.set_header(
       'Cache-Control',
       'no-store, no-cache, must-revalidate, max-age=0')
-    self.render_template("page2.html", {})
+    self.render_template("form.html", {})
+    
+  def post(self):
+    email = self.get_body_argument('email', None)
+    comments = self.get_body_argument('comments', None)
+    error = ''
+    if email:
+      print('EMAIL:', email)
+      send_email(email, comments)
+      self.redirect('/form-success')
+      
+    else:
+      error = 'GIVE ME YOUR EMAIL!'
+      
+    self.set_header(
+      'Cache-Control',
+      'no-store, no-cache, must-revalidate, max-age=0')
+    self.render_template("form.html", {'error': error})
     
 def make_app():
   return tornado.web.Application([
     (r"/", MainHandler),
-    (r"/page2", Page2Handler),
+    (r"/form", FormHandler),
+    (r"/(page2)", PageHandler),
+    (r"/(form-success)", PageHandler),
     (
       r"/static/(.*)",
       tornado.web.StaticFileHandler,
